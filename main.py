@@ -1,73 +1,95 @@
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, r2_score
-import matplotlib.pyplot as plt
+import os
+import sys                        # system specific parameters and functions : 파이썬 스크립트 관리
+from PyQt5.QtWidgets import *     # GUI의 그래픽적 요소를 제어       하단의 terminal 선택, activate py37_32,  pip install pyqt5,   전부다 y
+from PyQt5 import uic             # ui 파일을 가져오기위한 함수
+from PyQt5.QtCore import *        # eventloop/스레드를 사용 할 수 있는 함수 가져옴.
 
-def app1(x):
-    if(x["시가수익률"] > 50): return 1
-    else: return 0
-def app2(x):
-    if(x["고가수익률"] <0): return 0
-    elif(x["고가수익률"]<0.2): return 1
-    elif (x["고가수익률"] < 0.4): return 2
-    elif (x["고가수익률"] < 0.6): return 3
-    elif (x["고가수익률"] < 0.8): return 4
-    elif (x["고가수익률"] < 1.0): return 5
-    elif (x["고가수익률"] < 1.2): return 6
-    elif (x["고가수익률"] < 1.4): return 7
-    elif (x["고가수익률"] < 1.6): return 8
-    elif (x["고가수익률"] < 1.8): return 9
-    elif (x["고가수익률"] < 2.0): return 10
-    elif (x["고가수익률"] < 2.2):return 11
-    elif (x["고가수익률"] < 2.4): return 12
-    elif (x["고가수익률"] < 2.6): return 13
-    elif (x["고가수익률"] < 2.8): return 14
-    else: return 15
+################# 직접 만든 파일들
+from kiwoom import Kiwoom          # 키움증권 함수/공용 방 (싱글턴)
+from account import Account      # 계좌평가잔고내역 가져오기
+from randomforest import Randomforest            # 데이터 가져오기
+from trade import Trade         # 자동매매 시작
 
-gongmo = pd.read_excel("공모주.xlsx",engine = 'openpyxl')
-#gongmo = gongmo[gongmo['스팩주'].isna() | (gongmo['스팩주'] != 'ㅇ')]
-#gongmo = gongmo[gongmo['이전상장'].isna() | (gongmo['이전상장'] != 'ㅇ')]
-gongmo["시가수익률"] = (gongmo["시가"]-gongmo["공모가"] / gongmo["공모가"]) * 100
-gongmo["고가수익률"] = (gongmo["고가"]-gongmo["공모가"] / gongmo["공모가"]) * 100
-gongmo["유통금액"] = (gongmo["시가총액"] * gongmo["유통비율"])/100
 
-gongmo["수익계수"] = gongmo.apply(app1, axis=1)
+form_class = uic.loadUiType("gui.ui")[0]             # 만들어 놓은 ui 불러오기
 
-gongmo["TEST"] = gongmo["의무보유확약"] + gongmo["기관경쟁률"]/10 + gongmo["보호예수비율"]
+class Login_Machnine(QMainWindow, QWidget, form_class):
 
-data = gongmo[['기관경쟁률', '시가수익률']].dropna()
+    def __init__(self, *args, **kwargs):
 
-# 독립 변수(X)와 종속 변수(y) 정의
-X = data[['기관경쟁률']]
-y = data['시가수익률']
+        print("Login Machine 실행합니다.")
+        super(Login_Machnine, self).__init__(*args, **kwargs)
+        form_class.__init__(self)
+        self.setUI()                                         # UI 초기값 셋업 반드시 필요
 
-# 학습 데이터와 테스트 데이터 분리
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=41)
+        ### 초기 셋팅
+        self.label_11.setText(str("총매입금액"))
+        self.label_12.setText(str("총평가금액"))
+        self.label_13.setText(str("추정예탁자산"))
+        self.label_14.setText(str("총평가손익금액"))
+        self.label_15.setText(str("총수익률(%)"))
 
-# 선형 회귀 모델 생성 및 학습
-model = LinearRegression()
-model.fit(X_train, y_train)
+        #### 기타 함수
+        self.login_event_loop = QEventLoop()  # 이때 QEventLoop()는 block 기능을 가지고 있다.
 
-# 예측 수행
-y_pred = model.predict(X_test)
+        ####키움증권 로그인 하기
+        self.k = Kiwoom()
+        self.set_signal_slot()
+        self.signal_login_commConnect()
 
-# 결과 평가
-mse = mean_squared_error(y_test, y_pred)
-r2 = r2_score(y_test, y_pred)
+        #####이벤트 생성 및 진행
+        self.call_account.clicked.connect(self.c_acc)          #계좌정보가져오기
+        self.R_F.clicked.connect(self.G_data)             #데이터 가져오기
+        self.Auto_Start.clicked.connect(self.auto)            #자동매매 시작
 
-print(f'Mean Squared Error: {mse}')
-print(f'R-squared: {r2}')
+    def setUI(self):
+        self.setupUi(self)                # UI 초기값 셋업
 
-# 회귀 계수와 절편 출력
-print(f'회귀 계수: {model.coef_[0]}')
-print(f'절편: {model.intercept_}')
+    def set_signal_slot(self):
+        self.k.kiwoom.OnEventConnect.connect(self.login_slot)
 
-plt.figure(figsize=(8, 6))
-plt.scatter(X_test, y_test, color='blue', label='Actual',s=20)  # 실제 값
-plt.plot(X_test, y_pred, color='red', linewidth=2, label='Predicted')  # 예측 값
-plt.xlabel('x')
-plt.ylabel('siga')
-plt.title('test')
-plt.legend()
-plt.show()
+    def signal_login_commConnect(self):
+        self.k.kiwoom.dynamicCall("CommConnect()")
+        self.login_event_loop.exec_()  # 로그인이 완료될 때까지 계속 반복됨
+
+    def login_slot(self, errCode):
+        if errCode == 0:
+            print("로그인 성공")
+            self.statusbar.showMessage("로그인 성공")
+            self.get_account_info()                    # 로그인시 계좌정보 가져오기
+
+        elif errCode == 100:
+            print("사용자 정보교환 실패")
+        elif errCode == 101:
+            print("서버접속 실패")
+        elif errCode == 102:
+            print("버전처리 실패")
+        self.login_event_loop.exit()  # 로그인이 완료되면 로그인 창을 닫는다.
+
+    def get_account_info(self):
+        account_list = self.k.kiwoom.dynamicCall("GetLoginInfo(String)", "ACCNO")
+
+        for n in account_list.split(';'):
+            self.accComboBox.addItem(n)
+
+    def c_acc(self):
+        print("선택 계좌 정보 가져오기")
+        h1 = Account(self)
+        h1.start()
+
+    def G_data(self):
+        print("random forest")
+        h2 = Randomforest(self)
+        h2.start()
+
+
+    def auto(self):
+        print("자동매매 시작")
+        h3 = Trade(self)
+        h3.start()
+
+if __name__=='__main__':
+    app = QApplication(sys.argv)
+    CH = Login_Machnine()
+    CH.show()
+    app.exec_()                      # 이벤트 루프
